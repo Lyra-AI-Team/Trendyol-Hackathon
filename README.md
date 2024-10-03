@@ -1,1 +1,1 @@
-<h2>Teknofest ve Trendyol işbirliği ile düzenlenen E-Ticaret Hackathon'unda finale kalan tek liseli takım olarak yer aldık</h2>
+<h2>We have participated in Teknofest&Trendyol E-Commerce Hackathon as the only highschooler finalists</h2>

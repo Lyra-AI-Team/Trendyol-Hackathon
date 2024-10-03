@@ -6,4 +6,4 @@
 <br>
 <a href="https://huggingface.co/datasets/ahmeterdempmk/Llama-E-Commerce-Fine-Tune-Data">Text Generation Fine Tune Data</a>
 <br>
-<a href="https://huggingface.co/emirkaanozdemr/Trendyol-Hackathon-Autoencoder-Model">CV AutoEncoder Modek</a>
+<a href="https://huggingface.co/emirkaanozdemr/Trendyol-Hackathon-Autoencoder-Model">CV AutoEncoder Model</a>

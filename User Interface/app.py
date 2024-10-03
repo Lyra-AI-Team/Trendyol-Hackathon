@@ -21,6 +21,8 @@ from datasets import load_dataset
 from peft import LoraConfig
 from trl import SFTTrainer
 from transformers import pipeline
+import re
+import json
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -149,7 +151,7 @@ languages = {
 }
 
 
-tr_list = ["Lyra AI E-commerce Hackathon Project", "Select Model Sharpness", "Your Product", "Your Explanation About Your Product", "Generate", "Generated Image"]
+tr_list = ["Lyra AI E-commerce Hackathon Project", "Select Model Sharpness", "Your Product", "Your Explanation About Your Product", "Generate Image", "Generate Title and Description", "Generated Image", "Generated Title", "Generated Description"]
 tr_list_tr = []
 @register_keras_serializable(package='Custom', name='mse')
 def custom_mse(y_true, y_pred):
@@ -230,9 +232,9 @@ threshold = st.slider(tr_list_tr[1], min_value = 50, max_value = 100, value = 75
 threshold=threshold*3
 img = st.camera_input(tr_list_tr[2])
 text = st.text_input(tr_list_tr[3])
-if st.button(tr_list[4]):
+if st.button(tr_list_tr[4]):
     
-    if img and text is not None:
+    if img is not None:
         img=Image.open(img)
         img1=remove(img)
         if img1.mode == 'RGBA':
@@ -244,7 +246,21 @@ if st.button(tr_list[4]):
         pred_img = Image.fromarray(pred_img.astype('uint8')) 
         level =  blur_level(pred_img)
         #st.write(level, threshold)
-        prompt = f"""
+        torch.cuda.empty_cache()
+        if level < threshold:
+            if img.mode == 'RGB':
+                img = img.convert('RGB')
+            init_image = img.thumbnail((768, 768))
+            i_prompt = "Remove the background from the image and correct the perspective of the subject to ensure a straight and clear view."
+            images = i_pipe(prompt=i_prompt, image=init_image, strength=0.75, guidance_scale=7.5).images
+            images[0].save("output.png")
+            image = Image.open("./output.png")
+            st.image(image, caption=tr_list_tr[6], use_column_width=True)
+
+        else:
+            st.image(pred_img, caption=tr_list_tr[2], use_column_width=True)
+if st.button(tr_list_tr[5]):
+    prompt = f"""
 You are extracting product title and description from given text and rewriting the description and enhancing it when necessary.
 Always give response in the user's input language.
 Always answer in the given json format. Do not use any other keywords. Do not make up anything.
@@ -266,23 +282,15 @@ Answer: {{"title": "Blackberry Jam", "description": "Please store it in cold con
 
 Now answer this:
 Product Information: {text}"""
-        pipe = pipeline(task="text-generation", model=model, tokenizer=tokenizer, max_length=10000)
-        torch.cuda.empty_cache()
-        if level > threshold:
-            if img.mode == 'RGB':
-                img = img.convert('RGB')
-            init_image = img.thumbnail((768, 768))
-            i_prompt = "Remove the background from the image and correct the perspective of the subject to ensure a straight and clear view."
-            images = i_pipe(prompt=i_prompt, image=init_image, strength=0.75, guidance_scale=7.5).images
-            images[0].save("output.png")
-            image = Image.open("./output.png")
-            st.image(image, caption=tr_list_tr[5], use_column_width=True)
-            result = pipe(f"Prompt: {prompt} \n Response:") # result = pipe(f"Prompt: {prompt} \n Response:")
-            generated_text = result[0]['generated_text']
-            st.write(generated_text)
+    pipe = pipeline(task="text-generation", model=model, tokenizer=tokenizer, max_length=10000)
+    result = pipe(f"Prompt: {prompt} \n Response:") # result = pipe(f"Prompt: {prompt} \n Response:")
+    generated_text = result[0]['generated_text']
+    json_string = re.search(r'Response: (\{.*?\})', generated_text, re.DOTALL).group(1)
+    data = json.loads(json_string)
 
-        else:
-            st.image(pred_img, caption=tr_list_tr[2], use_column_width=True)
-            result = pipe(f"Prompt: {prompt} \n Response:") # result = pipe(f"Prompt: {prompt} \n Response:")
-            generated_text = result[0]['generated_text']
-            st.write(generated_text)
+    generated_title = data['title']
+    generated_description = data['description']
+    generated_title = translator.translate(result, dest=languages[language]).text
+    generated_description = translator.translate(result, dest=languages[language]).text
+    st.write(f"{tr_list_tr[7]}: {generated_title}")
+    st.wrtie(f"{tr_list_tr[8]}: {generated_description}")

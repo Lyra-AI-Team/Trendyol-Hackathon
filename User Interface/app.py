@@ -234,7 +234,7 @@ if model_choice == "Image Model":
     image_model = load_image_model()
     torch.cuda.empty_cache()
 
-    img = st.camera_input(tr_list_tr[2])
+    img = st.file_uploader(tr_list_tr[2], type=["jpg", "jpeg", "png"])
     threshold = st.slider(tr_list_tr[1], min_value=50, max_value=100, value=75)
     threshold = threshold * 4
 
@@ -280,12 +280,6 @@ elif model_choice == "Text Model":
 You are extracting product title and description from given text and rewriting the description and enhancing it when necessary.
 Always answer like the examples. Do not use any other keywords. Do not make up anything.
 
-Response Format:
-{{
-"title": "<title of the product>",
-"description": "<description of the product>"
-}}
-
 Examples:
 
 Product Information: Rosehip Marmalade, keep it cold 
@@ -298,7 +292,9 @@ Answer:
 Recommended Title: Blackberry Jam
 Description: Please store it in cold conditions. Recommended to be consumed at breakfast. Very sweet.
 
-Now answer this: Product Information: {text}
+Now extract the title and description from:
+Product Information: 
+{text}
 """
         
         pipe = pipeline(task="text-generation", model=model, tokenizer=tokenizer, max_length=1000)
@@ -307,7 +303,7 @@ Now answer this: Product Information: {text}
         #generated_text=translator.translate(text, dest=languages[language]).text
         #json_string = re.search(r'Response: (\{.*?\})', generated_text, re.DOTALL).group(1)
         #data = json.loads(json_string)
-
+        #title = generated_text.split("Answer: Recommended Title:"
         #st.write(f"{tr_list_tr[7]}: {data['title']}")
         #st.write(f"{tr_list_tr[8]}: {data['description']}")
         st.write(generated_text)

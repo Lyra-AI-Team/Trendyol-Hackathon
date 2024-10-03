@@ -23,6 +23,7 @@ from trl import SFTTrainer
 from transformers import pipeline
 import re
 import json
+import gc
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -32,78 +33,7 @@ from transformers import (
     logging,
 )
 
-promt = None
-
-i_pipe = StableDiffusionImg2ImgPipeline.from_pretrained("runwayml/stable-diffusion-v1-5").to('cpu')
-torch.cuda.empty_cache()
-
-
-base_model = "amd/AMD-Llama-135m" # https://huggingface.co/meta-llama/Llama-3.2-1B
-
-hf_dataset = "ahmeterdempmk/Llama-E-Commerce-Fine-Tune-Data" # https://huggingface.co/ahmeterdempmk/Llama-E-Commerce-Fine-Tune-Data
-
-dataset = load_dataset(hf_dataset, split="train")
-torch.cuda.empty_cache()
-
-compute_dtype = getattr(torch, "float16")
-
-quant_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=compute_dtype,
-    bnb_4bit_use_double_quant=False,
-)
-
-model = AutoModelForCausalLM.from_pretrained (
-    base_model,
-    quantization_config=quant_config,
-    device_map={"": 0}
-)
-model.config.use_cache = False
-model.config.pretraining_tp = 1
-model.low_cpu_mem_usage=True
-tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
-tokenizer.pad_token = tokenizer.eos_token
-tokenizer.padding_side = "right"
-peft_params = LoraConfig (
-    lora_alpha=16, # the scaling factor for the low-rank matrices
-    lora_dropout=0.1, # the dropout probability of the LoRA layers
-    r=64, # the dimension of the low-rank matrices
-    bias="none",
-    task_type="CAUSAL_LM", # the task to train for (sequence-to-sequence language modeling in this case)
-)
-training_params = TrainingArguments (
-    output_dir="./LlamaResults",
-    num_train_epochs=5, # One training epoch.
-    per_device_train_batch_size=4, # Batch size per GPU for training.
-    gradient_accumulation_steps=1, # This refers to the number of steps required to accumulate the gradients during the update process.
-    optim="paged_adamw_32bit", # Model optimizer (AdamW optimizer).
-    save_steps=25,
-    logging_steps=25,
-    learning_rate=2e-4, # Initial learning rate. (Llama 3.1 8B ile hesaplandı)
-    weight_decay=0.001, # Weight decay is applied to all layers except bias/LayerNorm weights.
-    fp16=False, # Disable fp16/bf16 training.
-    bf16=False, # Disable fp16/bf16 training.
-    max_grad_norm=0.3, # Gradient clipping.
-    max_steps=-1,
-    warmup_ratio=0.03,
-    group_by_length=True,
-    lr_scheduler_type="constant",
-    report_to="tensorboard"
-)
-trainer = SFTTrainer(
-    model=model,
-    train_dataset=dataset,
-    peft_config=peft_params,
-    dataset_text_field="input",
-    max_seq_length=None,
-    tokenizer=tokenizer,
-    args=training_params,
-    packing=False,
-)
-train_output = trainer.train()
-torch.cuda.empty_cache()
-
+# Language Dictionary
 languages = {
     "Türkçe": "tr", 
     "Azərbaycan dili": "az",  
@@ -150,9 +80,10 @@ languages = {
     "isiXhosa": "xh"
 }
 
-
+# Translatable Texts
 tr_list = ["Lyra AI E-commerce Hackathon Project", "Select Model Sharpness", "Your Product", "Your Explanation About Your Product", "Generate Image", "Generate Title and Description", "Generated Image", "Generated Title", "Generated Description"]
 tr_list_tr = []
+
 @register_keras_serializable(package='Custom', name='mse')
 def custom_mse(y_true, y_pred):
     return K.mean(K.square(y_true - y_pred))
@@ -201,14 +132,87 @@ class STN(layers.Layer):
 
 get_custom_objects().update({'STN': STN})
 
-###!!!Functions Should Be Here!!!###
+translator = Translator()
+
+def translate_texts(language):
+    return [translator.translate(text, dest=languages[language]).text for text in tr_list]
+
+def free_up_memory():
+    """Function to free up GPU memory."""
+    torch.cuda.empty_cache()
+    gc.collect()
+
+def load_image_model():
+    """Load the image model."""
+    model = load_model("autoencoder.h5", custom_objects={'mse': custom_mse})
+    return model
+
+def load_text_model(base_model, hf_dataset):
+    """Load the text model and tokenizer."""
+    dataset = load_dataset(hf_dataset, split="train")
+    compute_dtype = getattr(torch, "float16")
+
+    quant_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=compute_dtype,
+        bnb_4bit_use_double_quant=False,
+    )
+
+    model = AutoModelForCausalLM.from_pretrained(base_model, quantization_config=quant_config, device_map={"": 0})
+    model.config.use_cache = False
+    model.config.pretraining_tp = 1
+    model.low_cpu_mem_usage = True
+    tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "right"
+
+    peft_params = LoraConfig(
+        lora_alpha=16,
+        lora_dropout=0.1,
+        r=64,
+        bias="none",
+        task_type="CAUSAL_LM"
+    )
+
+    training_params = TrainingArguments(
+        output_dir="./LlamaResults",
+        num_train_epochs=5,
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=1,
+        optim="paged_adamw_32bit",
+        save_steps=25,
+        logging_steps=25,
+        learning_rate=2e-4,
+        weight_decay=0.001,
+        fp16=False,
+        max_grad_norm=0.3,
+        max_steps=-1,
+        warmup_ratio=0.03,
+        group_by_length=True,
+        lr_scheduler_type="constant",
+        report_to="tensorboard"
+    )
+
+    trainer = SFTTrainer(
+        model=model,
+        train_dataset=dataset,
+        peft_config=peft_params,
+        dataset_text_field="input",
+        max_seq_length=None,
+        tokenizer=tokenizer,
+        args=training_params,
+        packing=False,
+    )
+    return model, trainer, tokenizer
 
 def process_image(input_img):
-    input_img=input_img.resize((224,224)) 
-    input_img=np.array(input_img)
-    input_img=input_img/255.0
-    input_img=np.expand_dims(input_img,axis=0)
+    input_img = input_img.resize((224, 224))
+    input_img = np.array(input_img)
+    input_img = input_img / 255.0
+    input_img = np.expand_dims(input_img, axis=0)
     return input_img
+
 def blur_level(image):
     if isinstance(image, Image.Image):
         image = np.array(image)
@@ -218,55 +222,65 @@ def blur_level(image):
     return variance
 
 
-image_model = load_model("autoencoder.h5", custom_objects={'mse': custom_mse})
-torch.cuda.empty_cache()
+# Interface
 language = st.selectbox("Select Language", list(languages.keys()))
+tr_list_tr = translate_texts(language)
 
-if language:
-    translator = Translator()
-    tr_list_tr = [translator.translate(text, dest=languages[language]).text for text in tr_list]
+model_choice = st.radio(tr_list_tr[0], ("Image Model", "Text Model"))
+free_up_memory()
 
-st.title(tr_list_tr[0])
+if model_choice == "Image Model":
+    st.title(tr_list_tr[0])
+    image_model = load_image_model()
+    torch.cuda.empty_cache()
 
-threshold = st.slider(tr_list_tr[1], min_value = 50, max_value = 100, value = 75)
-threshold=threshold*3
-img = st.camera_input(tr_list_tr[2])
-text = st.text_input(tr_list_tr[3])
-if st.button(tr_list_tr[4]):
-    
-    if img is not None:
-        img=Image.open(img)
-        img1=remove(img)
+    img = st.camera_input(tr_list_tr[2])
+    threshold = st.slider(tr_list_tr[1], min_value=50, max_value=100, value=75)
+    threshold = threshold * 4
+
+    if img:
+        img = Image.open(img)
+        img1 = remove(img)
         if img1.mode == 'RGBA':
             img1 = img1.convert('RGB')
         input_img = process_image(img1)
-        torch.cuda.empty_cache()
         prediction = image_model.predict(input_img)
-        pred_img = np.clip(prediction[0], 0, 1) * 255 
-        pred_img = Image.fromarray(pred_img.astype('uint8')) 
-        level =  blur_level(pred_img)
-        #st.write(level, threshold)
-        torch.cuda.empty_cache()
+        pred_img = np.clip(prediction[0], 0, 1) * 255
+        pred_img = Image.fromarray(pred_img.astype('uint8'))
+        level = blur_level(pred_img)
+        st.write(level)
         if level < threshold:
-            if img.mode == 'RGB':
-                img = img.convert('RGB')
-            init_image = img.thumbnail((768, 768))
+            free_up_memory()
+            i_pipe = StableDiffusionImg2ImgPipeline.from_pretrained("runwayml/stable-diffusion-v1-5").to("cpu")
+            img = np.array(img)
+            img = cv2.resize(img, (768, 768))
+            img = Image.fromarray(img)
             i_prompt = "Remove the background from the image and correct the perspective of the subject to ensure a straight and clear view."
-            images = i_pipe(prompt=i_prompt, image=init_image, strength=0.75, guidance_scale=7.5).images
+            images = i_pipe(prompt=i_prompt, image=img, strength=0.75, guidance_scale=7.5).images
+            free_up_memory()
             images[0].save("output.png")
             image = Image.open("./output.png")
             st.image(image, caption=tr_list_tr[6], use_column_width=True)
-
+            free_up_memory()
+            
         else:
-            st.image(pred_img, caption=tr_list_tr[2], use_column_width=True)
-if st.button(tr_list_tr[5]):
-    prompt = f"""
-You are extracting product title and description from given text and rewriting the description and enhancing it when necessary.
-Always give response in the user's input language.
-Always answer in the given json format. Do not use any other keywords. Do not make up anything.
-Explanations should contain at least three sentences each.
+            st.image(pred_img, caption=tr_list_tr[6], use_column_width=True)
 
-Json Format:
+elif model_choice == "Text Model":
+    st.title(tr_list_tr[0])
+    base_model = "amd/AMD-Llama-135m"
+    hf_dataset = "ahmeterdempmk/Llama-E-Commerce-Fine-Tune-Data"
+    model, trainer, tokenizer = load_text_model(base_model, hf_dataset)
+    torch.cuda.empty_cache()
+
+    text = st.text_input(tr_list_tr[3])
+    #text = translator.translate(text, dest="en").text
+    if text and st.button(tr_list_tr[5]):
+        prompt = f"""
+You are extracting product title and description from given text and rewriting the description and enhancing it when necessary.
+Always answer like the examples. Do not use any other keywords. Do not make up anything.
+
+Response Format:
 {{
 "title": "<title of the product>",
 "description": "<description of the product>"
@@ -274,23 +288,28 @@ Json Format:
 
 Examples:
 
-Product Information: Rosehip Marmalade, keep it cold
-Answer: {{"title": "Rosehip Marmalade", "description": "You should store this delicisious roseship marmelade in cold conditions. You can use it in your breakfasts and meals."}}
+Product Information: Rosehip Marmalade, keep it cold 
+Answer: 
+Recommended Title: Rosehip Marmelade
+Description: You should store this delicisious roseship marmelade in cold conditions. You can use it in your breakfasts and meals.
 
-Product Information: Blackberry jam spoils in the heat
-Answer: {{"title": "Blackberry Jam", "description": "Please store it in cold conditions. Recommended to be consumed at breakfast. Very sweet."}}
+Product Information: Blackberry jam spoils in the heat 
+Answer:
+Recommended Title: Blackberry Jam
+Description: Please store it in cold conditions. Recommended to be consumed at breakfast. Very sweet.
 
-Now answer this:
-Product Information: {text}"""
-    pipe = pipeline(task="text-generation", model=model, tokenizer=tokenizer, max_length=10000)
-    result = pipe(f"Prompt: {prompt} \n Response:") # result = pipe(f"Prompt: {prompt} \n Response:")
-    generated_text = result[0]['generated_text']
-    json_string = re.search(r'Response: (\{.*?\})', generated_text, re.DOTALL).group(1)
-    data = json.loads(json_string)
+Now answer this: Product Information: {text}
+"""
+        
+        pipe = pipeline(task="text-generation", model=model, tokenizer=tokenizer, max_length=1000)
+        result = pipe(f"Prompt: {prompt} \n Response:")
+        generated_text = result[0]['generated_text']
+        #generated_text=translator.translate(text, dest=languages[language]).text
+        #json_string = re.search(r'Response: (\{.*?\})', generated_text, re.DOTALL).group(1)
+        #data = json.loads(json_string)
 
-    generated_title = data['title']
-    generated_description = data['description']
-    generated_title = translator.translate(result, dest=languages[language]).text
-    generated_description = translator.translate(result, dest=languages[language]).text
-    st.write(f"{tr_list_tr[7]}: {generated_title}")
-    st.wrtie(f"{tr_list_tr[8]}: {generated_description}")
+        #st.write(f"{tr_list_tr[7]}: {data['title']}")
+        #st.write(f"{tr_list_tr[8]}: {data['description']}")
+        st.write(generated_text)
+        
+free_up_memory()

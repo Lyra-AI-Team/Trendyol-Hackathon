@@ -5,6 +5,6 @@
 <br>
 <a href="https://huggingface.co/ahmeterdempmk/Gemma2-2b-E-Commerce-Tuned">Gemma2 2b Fine Tuned Text Generation Model</a>
 <br>
-<a href="https://huggingface.co/datasets/ahmeterdempmk/Llama-E-Commerce-Fine-Tune-Data">Text Generation Data</a>
+<a href="https://huggingface.co/datasets/ahmeterdempmk/E-Commerce-Fine-Tune-Data">Text Generation E-Commerce Data</a>
 <br>
 <a href="https://huggingface.co/emirkaanozdemr/Trendyol-Hackathon-Autoencoder-Model">CV AutoEncoder Model</a>
